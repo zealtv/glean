@@ -9,6 +9,7 @@ usage:
   glean.sh ingest - <name>
   glean.sh capture <id>
   glean.sh index
+  glean.sh fetch [--all] <q...>
   glean.sh finding <finding-id>
   glean.sh context <finding-id>
   glean.sh drop <id> [reason...]
@@ -166,6 +167,14 @@ extract_description() {
   ' "$1"
 }
 
+extract_triggers() {
+  awk '
+    /^## Triggers[[:space:]]*$/ { in_section=1; next }
+    in_section && /^## / { exit }
+    in_section { print }
+  ' "$1"
+}
+
 cmd_index() {
   require_glean
   local dir="$GLEAN_DIR/findings"
@@ -190,6 +199,42 @@ cmd_index() {
   } > "$idx"
 
   echo "$idx"
+}
+
+cmd_fetch() {
+  require_glean
+  local mode="strict"
+  if [[ "${1:-}" == "--all" || "${1:-}" == "-a" ]]; then
+    mode="all"
+    shift
+  fi
+  (( $# > 0 )) || die "fetch requires <q...>"
+  local terms=("$@")
+
+  local dir="$GLEAN_DIR/findings"
+  local files=()
+  mapfile -t files < <(find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.md' ! -name 'INDEX.md' 2>/dev/null | sort)
+
+  local f haystack term
+  for f in "${files[@]}"; do
+    if [[ "$mode" == "all" ]]; then
+      haystack="$(cat "$f")"
+    else
+      local id title desc triggers
+      id="$(basename "$f" .md)"
+      title="$(extract_title "$f")"
+      desc="$(extract_description "$f")"
+      triggers="$(extract_triggers "$f")"
+      haystack="$id"$'\n'"$title"$'\n'"$desc"$'\n'"$triggers"
+    fi
+
+    for term in "${terms[@]}"; do
+      if printf '%s' "$haystack" | grep -iqF -- "$term"; then
+        printf '%s\n' "$f"
+        break
+      fi
+    done
+  done
 }
 
 cmd_capture() {
@@ -339,6 +384,7 @@ main() {
     ingest) shift; cmd_ingest "$@" ;;
     capture) shift; cmd_capture "$@" ;;
     index) shift; cmd_index "$@" ;;
+    fetch) shift; cmd_fetch "$@" ;;
     finding) shift; cmd_finding "$@" ;;
     context) shift; cmd_context "$@" ;;
     drop) shift; cmd_drop "$@" ;;

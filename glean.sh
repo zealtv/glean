@@ -7,6 +7,7 @@ usage:
   glean.sh init
   glean.sh ingest <src> [name]
   glean.sh ingest - <name>
+  glean.sh capture <id>
   glean.sh finding <finding-id>
   glean.sh context <finding-id>
   glean.sh drop <id> [reason...]
@@ -149,6 +150,39 @@ cmd_ingest() {
   echo "$dest"
 }
 
+cmd_capture() {
+  require_glean
+  local id="${1:-}"
+  [[ -n "$id" ]] || die "capture requires <id>"
+  validate_id "$id"
+
+  local dest="$GLEAN_DIR/findings/$id.md"
+  [[ ! -e "$dest" ]] || die "findings/$id.md already exists"
+  [[ ! -e "$GLEAN_DIR/findings/$id" ]] || die "findings/$id already exists (old-shape directory)"
+
+  mkdir -p "$GLEAN_DIR/findings"
+
+  if [[ -t 0 ]]; then
+    cat > "$dest" <<'TEMPLATE'
+# <title>
+
+<single-line description>
+
+## Why
+
+## Triggers
+
+## Associations
+
+## Context
+TEMPLATE
+  else
+    cat > "$dest"
+  fi
+
+  echo "$dest"
+}
+
 cmd_finding() {
   require_glean
   local id="${1:-}"
@@ -261,6 +295,7 @@ main() {
   case "$cmd" in
     init) shift; cmd_init "$@" ;;
     ingest) shift; cmd_ingest "$@" ;;
+    capture) shift; cmd_capture "$@" ;;
     finding) shift; cmd_finding "$@" ;;
     context) shift; cmd_context "$@" ;;
     drop) shift; cmd_drop "$@" ;;

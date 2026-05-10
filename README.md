@@ -8,15 +8,18 @@ guidance — what's worth carrying forward.
 
 ```
 .glean/
+  glean.sh
   in/                            ← raw inbox; anything goes
   findings/
     INDEX.md                     ← generated; always-loaded surface
     example-finding-001.md       ← one flat file per finding
     example-finding-002.md
-  dropped/
-    foo.md                       ← retired finding or in/ item
-    foo.reason.md                ← why it was dropped
-  distil.md                      ← host-local distilation instructions, editable
+  out/                           ← inbox items after distillation; swept on retention
+    foo.md
+  dropped/                       ← retired findings; durable reflection drawer
+    bar.md
+    bar.reason.md                ← why the finding was retired
+  distil.md                      ← host-local distillation instructions, editable
 ```
 
 The file system is the protocol.
@@ -51,9 +54,10 @@ Promotion to always-loaded is the host's call (e.g. by symlinking a specific
 finding into the host's always-context surface). Glean stays unaware of how
 its output is consumed.
 
+
 ## Procedure
 
-The default flow is three steps: ingest, distil, fetch.
+The default flow is: **ingest** raw material, **distil** it into findings, **fetch** findings on demand. Periodically, **curate** the corpus.
 
 ### Ingest
 
@@ -68,21 +72,28 @@ The default flow is three steps: ingest, distil, fetch.
 
 **Distil** is the act of turning raw material in `in/` into findings.
 
-Read each item in `in/`, then either:
-- sharpen an existing finding (edit `findings/<id>.md` in place);
-- create a new finding (`./glean.sh capture <id>`, piping the polished body);
-- drop the item (`./glean.sh drop <id> "reason"`).
+Read each item in `in/` and choose one of three outcomes:
 
-In each case the inbox item leaves `in/` — that's the signal it's been
-distilled. Run `./glean.sh index` afterwards to refresh `INDEX.md`.
+- **revise** an existing finding — edit `findings/<id>.md` in place;
+- **create** a new finding — write `findings/<new-id>.md` directly (a finding is just a file);
+- **nothing earned** — the material doesn't merit carry-forward.
 
-There is **no** `distil` command — distillation is what the
-agent does when it reads `distil.md`, looks at `in/`, and operates via the
-commands above. 
+In all three cases, close the inbox item:
+
+```sh
+./glean.sh complete <in-id>     # in/<id> → out/<id>
+```
+
+`out/` is the audit residue — every inbox item that was considered passes
+through it, regardless of whether a finding was produced. It's swept on
+retention. Items remaining in `in/` are still awaiting distillation.
+
+Run `./glean.sh index` after writing or revising findings to refresh `INDEX.md`.
 
 The `distil.md` brief seeded by `init` is host-local: edit it freely to
-shape distillation for *this* glean system. The protocol doesn't care what the
-brief says — it only cares about the finding contract.
+shape distillation for *this* glean system. The protocol doesn't care what
+the brief says — it only cares about the finding contract.
+
 
 ### Fetch
 
@@ -96,15 +107,30 @@ Strict by default keeps the agent's context lean and rewards writers who curate 
 Triggers section.
 
 
+### Curate
+
+Separately from inbox work, periodically sit with `findings/` as a whole:
+merge findings that overlap, split findings that have grown to cover two
+ideas, add wikilinks under `## Associations`, and retire findings that no
+longer earn their place.
+
+```sh
+./glean.sh drop <finding-id> "reason..."   # findings/<id>.md → dropped/
+```
+
+`dropped/` is the reflection drawer for retired ideas. It's durable — not
+swept — so old reasoning remains available to read later.
+
+
 ## Commands
 
 ```
 ./glean.sh init
 ./glean.sh ingest <src> [name]      # land raw material in in/ (use - for stdin)
-./glean.sh capture <id>             # stdin → findings/<id>.md (one-shot pre-disitilled findings)
+./glean.sh complete <id>            # in/<id> → out/<id>; closes a distillation
+./glean.sh drop <id> [reason...]    # findings/<id>.md → dropped/, with reason
 ./glean.sh index                    # regenerate findings/INDEX.md
 ./glean.sh fetch [--all] <q...>     # paths of findings matching query
-./glean.sh drop <id> [reason...]    # retire to dropped/, write <id>.reason.md
 ./glean.sh status                   # list trays
-./glean.sh sweep [days]             # remove dropped/ older than N days (default 14)
+./glean.sh sweep [days]             # remove out/ entries older than N days (default 14)
 ```

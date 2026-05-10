@@ -7,10 +7,10 @@ usage:
   glean.sh init
   glean.sh ingest <src> [name]
   glean.sh ingest - <name>
-  glean.sh capture <id>
+  glean.sh complete <id>
+  glean.sh drop <id> [reason...]
   glean.sh index
   glean.sh fetch [--all] <q...>
-  glean.sh drop <id> [reason...]
   glean.sh status
   glean.sh sweep [days]
 USAGE
@@ -21,22 +21,15 @@ die() {
   exit 1
 }
 
-find_repo_root() {
-  local dir="$PWD"
-  while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.glean" ]]; then
-      printf '%s\n' "$dir"
-      return 0
-    fi
-    dir="$(dirname "$dir")"
-  done
-  return 1
+resolve_paths() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  [[ "$(basename "$script_dir")" == ".glean" ]] || die "glean.sh must live inside a .glean/ directory"
+  GLEAN_DIR="$script_dir"
 }
 
 require_glean() {
-  REPO_ROOT="$(find_repo_root || true)"
-  [[ -n "${REPO_ROOT:-}" ]] || die "could not find .glean/ in this directory or any parent"
-  GLEAN_DIR="$REPO_ROOT/.glean"
+  resolve_paths
 }
 
 validate_id() {
@@ -45,40 +38,34 @@ validate_id() {
   [[ "$id" != *"/"* ]] || die "id cannot contain /"
 }
 
-# Locate <id> in in/ or findings/ (excluding dropped/). Considers all forms:
-#   in/<id>, in/<id>.md, in/<id>.landing
-#   findings/<id>.md, findings/<id> (legacy directory shape, refused at capture)
-# Prints the matching path on stdout. Errors if multiple matches.
-find_item_outside_dropped() {
+# Find a single in/ item matching <id>. Skips .landing partials.
+find_in_item() {
   local id="$1"
-  local matches=() d path
-  for d in in findings; do
-    local base="$GLEAN_DIR/$d"
-    [[ -d "$base" ]] || continue
-    for path in "$base/$id" "$base/$id.md" "$base/$id.landing" "$base/$id.md.landing"; do
-      [[ -e "$path" ]] && matches+=("$path")
-    done
+  local matches=() path
+  for path in "$GLEAN_DIR/in/$id" "$GLEAN_DIR/in/$id.md"; do
+    [[ -e "$path" ]] && matches+=("$path")
   done
-  if (( ${#matches[@]} == 0 )); then
-    return 1
-  fi
+  if (( ${#matches[@]} == 0 )); then return 1; fi
   if (( ${#matches[@]} > 1 )); then
     printf '%s\n' "${matches[@]}" >&2
-    die "multiple items found for id '$id'"
+    die "multiple in/ items match id '$id'"
   fi
   printf '%s\n' "${matches[0]}"
 }
 
 cmd_init() {
-  mkdir -p .glean/in .glean/findings .glean/dropped
-  if [[ ! -f .glean/distil.md ]]; then
-    cat > .glean/distil.md <<'DISTIL'
+  resolve_paths
+  mkdir -p "$GLEAN_DIR/in" "$GLEAN_DIR/findings" "$GLEAN_DIR/out" "$GLEAN_DIR/dropped"
+  if [[ ! -f "$GLEAN_DIR/distil.md" ]]; then
+    cat > "$GLEAN_DIR/distil.md" <<'DISTIL'
 # Distil
 
 This is the local brief for distillation in this glean.
 
-Distil is the act of turning raw material in `in/` into findings (or drops).
-Edit this file freely — the protocol doesn't care what you write here.
+Distil is the act of shaping the carry-forward corpus — both digesting new
+material from `in/` and curating `findings/` over time. The two rhythms
+share one posture; they differ in what triggers them and which verbs they
+use. Edit this file freely; the protocol doesn't care what you write here.
 
 ## Posture
 
@@ -86,31 +73,60 @@ Glean stays small, legible, and revisable. Keep it that way.
 
 - Do not force synthesis.
 - Do not mistake compression for understanding.
-- Do not create a new finding when association or revision is enough.
+- Do not create a new finding when revising an existing one is enough.
 - Do not let `findings/` grow into a heap.
 - Do not carry forward material that does not improve judgment.
 
 A heap of findings is just another inbox. The value of memory comes from the
 discipline of distillation, not the volume of capture.
 
-## Default movement
+## Per-item distillation
 
-When you distil an item in `in/`, the item should leave `in/`.
+When an item arrives in `in/`, read it and choose one of three outcomes:
 
-- A finding changed → digestion succeeded; the inbox item is dropped.
-- Material doesn't earn its place → the inbox item goes to `dropped/` with
-  a reason.
+1. **Revise** an existing finding — edit `findings/<id>.md`.
+2. **Create** a new finding — write `findings/<new-id>.md` directly.
+3. **Nothing earned** — the material doesn't merit carry-forward.
 
-Items remain in `in/` only while still awaiting distillation.
+In all three cases, close the inbox item:
 
-## Preferred order
+```
+glean.sh complete <in-id>      # in/<id> → out/<id>
+```
 
-When working on material in `in/`, prefer in this order:
+`out/` is the audit residue: every inbox item that was considered passes
+through it, regardless of whether a finding was produced. No reason needed.
+`out/` is swept on retention.
 
-1. **Associate** it with existing findings.
-2. **Revise** an existing finding if that is enough.
-3. **Create** a new finding only when needed.
-4. **Drop** the item if it does not merit carry-forward.
+The inbox item leaves `in/` only via `complete`. Items remaining in `in/`
+are still awaiting distillation.
+
+## Curation, in the same pass
+
+Curation is not a separate rhythm — it rides on per-item distillation. The
+moments below all happen *while* working an inbox item, so act on what you
+notice in the same pass:
+
+- **Before creating** a new finding, search `findings/` for similar ones.
+  If one already covers the ground, revise it instead.
+- **While revising**, if the finding has drifted to cover two ideas, split
+  it. If it now overlaps with another, merge them and `drop` the loser.
+- **When writing or revising**, link related findings under
+  `## Associations`.
+
+These moves are file edits plus `glean.sh drop`. Don't defer them — the
+in/ item is the trigger, and you only have this brief in context now.
+
+## Corpus review
+
+A deliberate "look across `findings/` as a whole" pass only happens when a
+human asks for it — the agent has no rhythm of its own to schedule one. On
+review, read across `findings/` and apply the same merge / split / link /
+retire moves at scale.
+
+`drop` retires a *finding* into `dropped/` with a reason file. `dropped/` is
+the reflection drawer for retired ideas — durable and not swept. Read it by
+hand when you want to remember what was let go and why.
 
 ## What a finding looks like
 
@@ -126,12 +142,15 @@ A finding is one markdown file at `findings/<id>.md`:
   - `## Associations` — wikilinks to related findings: `- [[other-id]]`.
   - `## Context` — examples, references, longer notes.
 
+Run `glean.sh index` after writing or revising a finding to refresh
+`findings/INDEX.md`.
+
 ## Local notes
 
 (Anything host-specific goes here.)
 DISTIL
   fi
-  echo "initialized .glean/"
+  echo "initialized $GLEAN_DIR"
 }
 
 cmd_ingest() {
@@ -258,36 +277,20 @@ cmd_fetch() {
   done
 }
 
-cmd_capture() {
+cmd_complete() {
   require_glean
   local id="${1:-}"
-  [[ -n "$id" ]] || die "capture requires <id>"
+  [[ -n "$id" ]] || die "complete requires <id>"
   validate_id "$id"
 
-  local dest="$GLEAN_DIR/findings/$id.md"
-  [[ ! -e "$dest" ]] || die "findings/$id.md already exists"
-  [[ ! -e "$GLEAN_DIR/findings/$id" ]] || die "findings/$id already exists"
+  local src
+  src="$(find_in_item "$id" || true)"
+  [[ -n "$src" ]] || die "no in/ item matches '$id'"
 
-  mkdir -p "$GLEAN_DIR/findings"
-
-  if [[ -t 0 ]]; then
-    cat > "$dest" <<'TEMPLATE'
-# <title>
-
-<single-line description>
-
-## Why
-
-## Triggers
-
-## Associations
-
-## Context
-TEMPLATE
-  else
-    cat > "$dest"
-  fi
-
+  mkdir -p "$GLEAN_DIR/out"
+  local dest="$GLEAN_DIR/out/$(basename "$src")"
+  [[ ! -e "$dest" ]] || die "out/$(basename "$src") already exists"
+  mv "$src" "$dest"
   echo "$dest"
 }
 
@@ -298,26 +301,19 @@ cmd_drop() {
   [[ -n "$id" ]] || die "drop requires <id>"
   validate_id "$id"
 
-  # Already-dropped friendliness: bare id or id.md present in dropped/
-  if [[ -e "$GLEAN_DIR/dropped/$id" || -e "$GLEAN_DIR/dropped/$id.md" ]]; then
+  if [[ -e "$GLEAN_DIR/dropped/$id.md" ]]; then
     echo "already dropped: $id"
     return 0
   fi
 
-  local src
-  src="$(find_item_outside_dropped "$id" || true)"
-  [[ -n "$src" ]] || die "item '$id' not found"
+  local src="$GLEAN_DIR/findings/$id.md"
+  [[ -e "$src" ]] || die "no finding 'findings/$id.md'"
 
-  # Canonical dest name: strip trailing .landing if present, preserve .md.
-  local src_base canonical
-  src_base="$(basename "$src")"
-  canonical="${src_base%.landing}"
-
-  local dest="$GLEAN_DIR/dropped/$canonical"
+  mkdir -p "$GLEAN_DIR/dropped"
+  local dest="$GLEAN_DIR/dropped/$id.md"
   [[ ! -e "$dest" ]] || die "drop destination already exists: $dest"
   mv "$src" "$dest"
 
-  # Reason file uses the bare id (no .md extension).
   local reason="$GLEAN_DIR/dropped/$id.reason.md"
   {
     echo "# why $id was dropped"
@@ -332,10 +328,10 @@ cmd_drop() {
   echo "$dest"
 }
 
-print_in() {
+print_dir_entries() {
   local dir="$1"
-  if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
-    find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) 2>/dev/null \
+  if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null | grep -v '^\.gitkeep$' || true)" ]]; then
+    find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) ! -name '.gitkeep' 2>/dev/null \
       | awk -F/ '{print $NF}' | sort | sed 's/^/- /'
   else
     echo "(empty)"
@@ -360,7 +356,7 @@ print_dropped() {
   local dir="$1"
   local entries=""
   if [[ -d "$dir" ]]; then
-    entries="$(find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) ! -name '*.reason.md' 2>/dev/null \
+    entries="$(find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) ! -name '*.reason.md' ! -name '.gitkeep' 2>/dev/null \
       | awk -F/ '{print $NF}' | sort)"
   fi
   if [[ -n "$entries" ]]; then
@@ -373,10 +369,13 @@ print_dropped() {
 cmd_status() {
   require_glean
   echo "in"
-  print_in "$GLEAN_DIR/in"
+  print_dir_entries "$GLEAN_DIR/in"
   echo
   echo "findings"
   print_findings "$GLEAN_DIR/findings"
+  echo
+  echo "out"
+  print_dir_entries "$GLEAN_DIR/out"
   echo
   echo "dropped"
   print_dropped "$GLEAN_DIR/dropped"
@@ -385,24 +384,20 @@ cmd_status() {
 cmd_sweep() {
   require_glean
   local days="${1:-14}"
-  local dir="$GLEAN_DIR/dropped"
+  local dir="$GLEAN_DIR/out"
   [[ -d "$dir" ]] || return 0
 
   local items=()
   if (( days == 0 )); then
-    mapfile -t items < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name '*.reason.md' 2>/dev/null | sort)
+    mapfile -t items < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' 2>/dev/null | sort)
   else
-    mapfile -t items < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name '*.reason.md' -mtime "+$days" 2>/dev/null | sort)
+    mapfile -t items < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -mtime "+$days" 2>/dev/null | sort)
   fi
 
-  local item base canonical reason
+  local item
   for item in "${items[@]}"; do
-    base="$(basename "$item")"
-    canonical="${base%.md}"
-    reason="$dir/$canonical.reason.md"
     rm -rf "$item"
-    [[ -e "$reason" ]] && rm -f "$reason"
-    echo "swept $base"
+    echo "swept $(basename "$item")"
   done
 }
 
@@ -411,10 +406,10 @@ main() {
   case "$cmd" in
     init) shift; cmd_init "$@" ;;
     ingest) shift; cmd_ingest "$@" ;;
-    capture) shift; cmd_capture "$@" ;;
+    complete) shift; cmd_complete "$@" ;;
+    drop) shift; cmd_drop "$@" ;;
     index) shift; cmd_index "$@" ;;
     fetch) shift; cmd_fetch "$@" ;;
-    drop) shift; cmd_drop "$@" ;;
     status) shift; cmd_status "$@" ;;
     sweep) shift; cmd_sweep "$@" ;;
     -h|--help|help|"") usage ;;

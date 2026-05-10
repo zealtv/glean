@@ -10,10 +10,9 @@ usage:
   glean.sh capture <id>
   glean.sh index
   glean.sh fetch [--all] <q...>
-  glean.sh finding <finding-id>
-  glean.sh context <finding-id>
   glean.sh drop <id> [reason...]
   glean.sh status
+  glean.sh sweep [days]
 USAGE
 }
 
@@ -46,15 +45,20 @@ validate_id() {
   [[ "$id" != *"/"* ]] || die "id cannot contain /"
 }
 
-strip_suffix() {
-  local name="$1"
-  printf '%s\n' "${name%.scribbling}"
-}
-
-find_unique_dir() {
+# Locate <id> in in/ or findings/ (excluding dropped/). Considers all forms:
+#   in/<id>, in/<id>.md, in/<id>.landing
+#   findings/<id>.md, findings/<id> (legacy directory shape, refused at capture)
+# Prints the matching path on stdout. Errors if multiple matches.
+find_item_outside_dropped() {
   local id="$1"
-  local matches=()
-  mapfile -t matches < <(find "$GLEAN_DIR" -mindepth 1 -maxdepth 2 -type d \( -name "$id" -o -name "$id.scribbling" \) -print)
+  local matches=() d path
+  for d in in findings; do
+    local base="$GLEAN_DIR/$d"
+    [[ -d "$base" ]] || continue
+    for path in "$base/$id" "$base/$id.md" "$base/$id.landing" "$base/$id.md.landing"; do
+      [[ -e "$path" ]] && matches+=("$path")
+    done
+  done
   if (( ${#matches[@]} == 0 )); then
     return 1
   fi
@@ -63,13 +67,6 @@ find_unique_dir() {
     die "multiple items found for id '$id'"
   fi
   printf '%s\n' "${matches[0]}"
-}
-
-ensure_absent() {
-  local id="$1"
-  if find_unique_dir "$id" >/dev/null 2>&1; then
-    die "item '$id' already exists"
-  fi
 }
 
 cmd_init() {
@@ -245,7 +242,7 @@ cmd_capture() {
 
   local dest="$GLEAN_DIR/findings/$id.md"
   [[ ! -e "$dest" ]] || die "findings/$id.md already exists"
-  [[ ! -e "$GLEAN_DIR/findings/$id" ]] || die "findings/$id already exists (old-shape directory)"
+  [[ ! -e "$GLEAN_DIR/findings/$id" ]] || die "findings/$id already exists"
 
   mkdir -p "$GLEAN_DIR/findings"
 
@@ -270,54 +267,6 @@ TEMPLATE
   echo "$dest"
 }
 
-cmd_finding() {
-  require_glean
-  local id="${1:-}"
-  [[ -n "$id" ]] || die "finding requires <finding-id>"
-  validate_id "$id"
-  [[ ! -e "$GLEAN_DIR/findings/$id" ]] || die "finding '$id' already exists"
-
-  local dir="$GLEAN_DIR/findings/$id"
-  mkdir -p "$dir"
-  cat > "$dir/finding.md" <<'FINDING'
-# Finding title
-
-## Claim
-State the current guidance.
-
-## Why
-Why this seems worth carrying.
-
-## Scope
-Where this applies, or does not apply.
-
-## Associations
-- ../related-finding/
-FINDING
-  echo "finding $dir"
-}
-
-cmd_context() {
-  require_glean
-  local id="${1:-}"
-  [[ -n "$id" ]] || die "context requires <finding-id>"
-  validate_id "$id"
-  local dir="$GLEAN_DIR/findings/$id"
-  [[ -d "$dir" ]] || die "finding '$id' not found"
-
-  local file="$dir/context.md"
-  if [[ ! -e "$file" ]]; then
-    cat > "$file" <<'CONTEXT'
-# Context
-
-Use this file for sources, notes, and examples.
-
-This file supports progressive disclosure. Keep the core guidance in `finding.md`.
-CONTEXT
-  fi
-  echo "context $file"
-}
-
 cmd_drop() {
   require_glean
   local id="${1:-}"
@@ -325,26 +274,29 @@ cmd_drop() {
   [[ -n "$id" ]] || die "drop requires <id>"
   validate_id "$id"
 
+  # Already-dropped friendliness: bare id or id.md present in dropped/
+  if [[ -e "$GLEAN_DIR/dropped/$id" || -e "$GLEAN_DIR/dropped/$id.md" ]]; then
+    echo "already dropped: $id"
+    return 0
+  fi
+
   local src
-  src="$(find_unique_dir "$id" || true)"
+  src="$(find_item_outside_dropped "$id" || true)"
   [[ -n "$src" ]] || die "item '$id' not found"
 
-  case "$src" in
-    "$GLEAN_DIR/dropped"/*)
-      echo "already dropped: $id"
-      return 0
-      ;;
-  esac
+  # Canonical dest name: strip trailing .landing if present, preserve .md.
+  local src_base canonical
+  src_base="$(basename "$src")"
+  canonical="${src_base%.landing}"
 
-  local canonical
-  canonical="$(strip_suffix "$(basename "$src")")"
   local dest="$GLEAN_DIR/dropped/$canonical"
-  [[ ! -e "$dest" ]] || die "destination already exists: $dest"
+  [[ ! -e "$dest" ]] || die "drop destination already exists: $dest"
   mv "$src" "$dest"
 
-  local reason="$GLEAN_DIR/dropped/$canonical.reason.md"
+  # Reason file uses the bare id (no .md extension).
+  local reason="$GLEAN_DIR/dropped/$id.reason.md"
   {
-    echo "# why $canonical was dropped"
+    echo "# why $id was dropped"
     echo
     if (( $# > 0 )); then
       printf '%s\n' "$*"
@@ -353,13 +305,42 @@ cmd_drop() {
     fi
   } > "$reason"
 
-  echo "dropped $canonical"
+  echo "$dest"
 }
 
-print_dirs() {
+print_in() {
   local dir="$1"
-  if find "$dir" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
-    find "$dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | sed 's/^/- /'
+  if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
+    find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) 2>/dev/null \
+      | awk -F/ '{print $NF}' | sort | sed 's/^/- /'
+  else
+    echo "(empty)"
+  fi
+}
+
+print_findings() {
+  local dir="$1"
+  local entries=""
+  if [[ -d "$dir" ]]; then
+    entries="$(find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.md' ! -name 'INDEX.md' 2>/dev/null \
+      | awk -F/ '{print $NF}' | sed 's/\.md$//' | sort)"
+  fi
+  if [[ -n "$entries" ]]; then
+    echo "$entries" | sed 's/^/- /'
+  else
+    echo "(empty)"
+  fi
+}
+
+print_dropped() {
+  local dir="$1"
+  local entries=""
+  if [[ -d "$dir" ]]; then
+    entries="$(find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) ! -name '*.reason.md' 2>/dev/null \
+      | awk -F/ '{print $NF}' | sort)"
+  fi
+  if [[ -n "$entries" ]]; then
+    echo "$entries" | sed 's/^/- /'
   else
     echo "(empty)"
   fi
@@ -368,13 +349,37 @@ print_dirs() {
 cmd_status() {
   require_glean
   echo "in"
-  print_dirs "$GLEAN_DIR/in"
+  print_in "$GLEAN_DIR/in"
   echo
   echo "findings"
-  print_dirs "$GLEAN_DIR/findings"
+  print_findings "$GLEAN_DIR/findings"
   echo
   echo "dropped"
-  print_dirs "$GLEAN_DIR/dropped"
+  print_dropped "$GLEAN_DIR/dropped"
+}
+
+cmd_sweep() {
+  require_glean
+  local days="${1:-14}"
+  local dir="$GLEAN_DIR/dropped"
+  [[ -d "$dir" ]] || return 0
+
+  local items=()
+  if (( days == 0 )); then
+    mapfile -t items < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name '*.reason.md' 2>/dev/null | sort)
+  else
+    mapfile -t items < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name '*.reason.md' -mtime "+$days" 2>/dev/null | sort)
+  fi
+
+  local item base canonical reason
+  for item in "${items[@]}"; do
+    base="$(basename "$item")"
+    canonical="${base%.md}"
+    reason="$dir/$canonical.reason.md"
+    rm -rf "$item"
+    [[ -e "$reason" ]] && rm -f "$reason"
+    echo "swept $base"
+  done
 }
 
 main() {
@@ -385,10 +390,9 @@ main() {
     capture) shift; cmd_capture "$@" ;;
     index) shift; cmd_index "$@" ;;
     fetch) shift; cmd_fetch "$@" ;;
-    finding) shift; cmd_finding "$@" ;;
-    context) shift; cmd_context "$@" ;;
     drop) shift; cmd_drop "$@" ;;
     status) shift; cmd_status "$@" ;;
+    sweep) shift; cmd_sweep "$@" ;;
     -h|--help|help|"") usage ;;
     *) die "unknown command '$cmd'" ;;
   esac

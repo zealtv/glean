@@ -8,6 +8,7 @@ usage:
   glean.sh ingest <src> [name]
   glean.sh ingest - <name>
   glean.sh capture <id>
+  glean.sh index
   glean.sh finding <finding-id>
   glean.sh context <finding-id>
   glean.sh drop <id> [reason...]
@@ -148,6 +149,47 @@ cmd_ingest() {
   fi
   mv "$landing" "$dest"
   echo "$dest"
+}
+
+extract_title() {
+  local line
+  line="$(grep -m1 '^# ' "$1" 2>/dev/null || true)"
+  printf '%s' "${line#\# }"
+}
+
+extract_description() {
+  awk '
+    /^# / && !found_title { found_title=1; next }
+    found_title && /^[[:space:]]*$/ { next }
+    found_title && /^#/ { exit }
+    found_title { print; exit }
+  ' "$1"
+}
+
+cmd_index() {
+  require_glean
+  local dir="$GLEAN_DIR/findings"
+  local idx="$dir/INDEX.md"
+  mkdir -p "$dir"
+
+  local files=()
+  mapfile -t files < <(find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.md' ! -name 'INDEX.md' 2>/dev/null | sort)
+
+  {
+    echo "<!-- auto-generated; run glean.sh index to refresh -->"
+    echo
+    local f id title desc
+    for f in "${files[@]}"; do
+      id="$(basename "$f" .md)"
+      title="$(extract_title "$f")"
+      desc="$(extract_description "$f")"
+      [[ -n "$title" ]] || title="$id"
+      [[ -n "$desc" ]] || desc="(no description)"
+      echo "- [[$id]] — $title — $desc"
+    done
+  } > "$idx"
+
+  echo "$idx"
 }
 
 cmd_capture() {
@@ -296,6 +338,7 @@ main() {
     init) shift; cmd_init "$@" ;;
     ingest) shift; cmd_ingest "$@" ;;
     capture) shift; cmd_capture "$@" ;;
+    index) shift; cmd_index "$@" ;;
     finding) shift; cmd_finding "$@" ;;
     context) shift; cmd_context "$@" ;;
     drop) shift; cmd_drop "$@" ;;

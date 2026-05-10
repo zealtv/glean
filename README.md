@@ -1,4 +1,4 @@
-# 🌾 glean
+# 🔮 glean
 
 A tiny, file-based protocol for memory and distillation.
 
@@ -126,7 +126,7 @@ Glean is the memory tile in a five-protocol family:
 - 🪡 **loom** — planning; threads of work.
 - 🪺 **nestlings** — work tray; in/ → tend → out/.
 - 🦫 **groundhog** — recurring items on a schedule.
-- 🌾 **glean** — memory; in/ → distil → findings/.
+- 🔮 **glean** — memory; in/ → distil → findings/.
 - 👀 **gremlin** — agent host that brings them together.
 
 All small, file-based, no metadata files, no frontmatter. The aesthetic is:
@@ -141,8 +141,9 @@ the filesystem is the API.
 
 A markdown filing cabinet with a tiny parse contract. That's all.
 
-## Tests
+## What ships
 
-```sh
-./test.sh
-```
+This repo's own `.glean/` is the scaffold you get from `glean.sh init`,
+seeded with one finding (`keep-glean-small`) that encodes the protocol's
+spirit. Clone, peek inside, and either reuse the structure or run `init`
+in your own project.

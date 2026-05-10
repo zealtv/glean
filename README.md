@@ -86,18 +86,37 @@ its output is consumed.
 ./glean.sh sweep [days]             # remove dropped/ older than N days (default 14)
 ```
 
-### Two entry points
+## Procedure
 
-- **`ingest <src> [name]`** lands raw material in `in/`. File or directory.
-  Use `-` as `<src>` to read stdin (requires explicit name). Mirrors
-  nestlings, uses the family-wide `.landing` write-protection suffix during
-  the move so an interrupted ingest leaves only `.landing` residue.
-- **`capture <id>`** writes a polished finding in one shot. Pipe stdin and
-  it lands at `findings/<id>.md` verbatim. Run on a TTY (no pipe) to seed
-  a template instead.
+The default flow is two steps:
 
-Use `ingest` for "I have raw stuff and don't know yet what to do with it";
-use `capture` for "I already know this is a finding."
+1. **Ingest** raw material into `in/`.
+   ```sh
+   ./glean.sh ingest some/note.md          # file or directory
+   echo "rough thought" | ./glean.sh ingest - rough
+   ```
+2. **Distil** the inbox. Read each item, then either:
+   - sharpen an existing finding (edit `findings/<id>.md` in place);
+   - create a new finding (`./glean.sh capture <id>`, piping the polished body);
+   - drop the item (`./glean.sh drop <id> "reason"`).
+
+   In each case the inbox item leaves `in/` — that's the signal it's been
+   distilled. Run `./glean.sh index` afterwards to refresh `INDEX.md`.
+
+Distillation is judgment, not a command. The brief at `.glean/distil.md`
+governs how to make those judgments — edit it to fit your project.
+
+### Optional: direct capture
+
+`capture` can be used without going through the inbox when you already know
+exactly what a finding should be:
+
+```sh
+printf '# Title\n\nA description.\n' | ./glean.sh capture some-id
+```
+
+Use this sparingly — distillation through `in/` is the default for a
+reason: it keeps the work visible and the tray small.
 
 ### `fetch` modes
 

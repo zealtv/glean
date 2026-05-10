@@ -4,13 +4,13 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 usage:
-  scribble.sh init
-  scribble.sh ingest <item-id>
-  scribble.sh ready <item-id>
-  scribble.sh finding <finding-id>
-  scribble.sh context <finding-id>
-  scribble.sh drop <id> [reason...]
-  scribble.sh status
+  glean.sh init
+  glean.sh ingest <item-id>
+  glean.sh ready <item-id>
+  glean.sh finding <finding-id>
+  glean.sh context <finding-id>
+  glean.sh drop <id> [reason...]
+  glean.sh status
 USAGE
 }
 
@@ -22,7 +22,7 @@ die() {
 find_repo_root() {
   local dir="$PWD"
   while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.scribble" ]]; then
+    if [[ -d "$dir/.glean" ]]; then
       printf '%s\n' "$dir"
       return 0
     fi
@@ -31,10 +31,10 @@ find_repo_root() {
   return 1
 }
 
-require_scribble() {
+require_glean() {
   REPO_ROOT="$(find_repo_root || true)"
-  [[ -n "${REPO_ROOT:-}" ]] || die "could not find .scribble/ in this directory or any parent"
-  SCRIBBLE_DIR="$REPO_ROOT/.scribble"
+  [[ -n "${REPO_ROOT:-}" ]] || die "could not find .glean/ in this directory or any parent"
+  GLEAN_DIR="$REPO_ROOT/.glean"
 }
 
 validate_id() {
@@ -51,7 +51,7 @@ strip_suffix() {
 find_unique_dir() {
   local id="$1"
   local matches=()
-  mapfile -t matches < <(find "$SCRIBBLE_DIR" -mindepth 1 -maxdepth 2 -type d \( -name "$id" -o -name "$id.scribbling" \) -print)
+  mapfile -t matches < <(find "$GLEAN_DIR" -mindepth 1 -maxdepth 2 -type d \( -name "$id" -o -name "$id.scribbling" \) -print)
   if (( ${#matches[@]} == 0 )); then
     return 1
   fi
@@ -70,55 +70,54 @@ ensure_absent() {
 }
 
 cmd_init() {
-  mkdir -p .scribble/in .scribble/findings .scribble/dropped
-  if [[ ! -f .scribble/dream.md ]]; then
-    cat > .scribble/dream.md <<'DREAM'
-# Dream
+  mkdir -p .glean/in .glean/findings .glean/dropped
+  if [[ ! -f .glean/distil.md ]]; then
+    cat > .glean/distil.md <<'DISTIL'
+# Distil
 
-Dream works across the whole Scribble surface.
+This is the local brief for distillation in this glean.
 
-It reads what has arrived in `in/`, compares it with what already lives in `findings/`, and either sharpens the live surface or lets material fall away.
+Distil is the act of turning raw material in `in/` into findings (or drops).
+Edit this file freely — the protocol doesn't care what you write here.
 
-Dream should keep Scribble small, legible, and revisable.
+## What a finding looks like
 
-## Baseline posture
+A finding is one markdown file at `findings/<id>.md`:
 
-- Do not force synthesis.
-- Do not mistake compression for understanding.
-- Do not create a new finding when association or revision is enough.
-- Do not let `findings/` grow into a heap.
-- Do not carry forward material that does not improve judgment.
+- **Title** — first line, an H1 (`# Some claim`). Required.
+- **Description** — first non-empty line after the title. One sentence.
+  Surfaces in `INDEX.md`; an agent reads it to decide relevance.
+- **Body** — free markdown. Common sections (all optional):
+  - `## Why` — motivation, source, the experience that earned this finding.
+  - `## Triggers` — phrases, topics, or symptoms that should bring this
+    finding to mind. `fetch` searches this by default.
+  - `## Associations` — wikilinks to related findings: `- [[other-id]]`.
+  - `## Context` — examples, references, longer notes.
 
-## Default movement
+## Posture
 
-When dream acts on an item in `in/`, that item should leave `in/`.
+- Prefer associating or revising over creating. The tray stays small and few.
+- Distillation produces findings worth carrying forward. If material doesn't
+  earn that, drop it with a reason.
+- An item leaving `in/` is the signal it has been distilled — either a
+  finding changed, or it landed in `dropped/`.
 
-Successful digestion changes `findings/`.
-Unusable, weak, malformed, or withdrawn material goes to `dropped/`.
+## Local notes
 
-Items should remain in `in/` only while still awaiting digestion.
-
-## Preferred order
-
-When working on material in `in/`, prefer this order:
-
-1. associate it with existing findings
-2. revise an existing finding if that is enough
-3. create a new finding only when needed
-4. drop the item if it does not merit carry-forward
-DREAM
+(Anything host-specific goes here.)
+DISTIL
   fi
-  echo "initialized .scribble/"
+  echo "initialized .glean/"
 }
 
 cmd_ingest() {
-  require_scribble
+  require_glean
   local id="${1:-}"
   [[ -n "$id" ]] || die "ingest requires <item-id>"
   validate_id "$id"
   ensure_absent "$id"
 
-  local dir="$SCRIBBLE_DIR/in/$id.scribbling"
+  local dir="$GLEAN_DIR/in/$id.scribbling"
   mkdir -p "$dir"
   cat > "$dir/note.md" <<'NOTE'
 # Note
@@ -129,13 +128,13 @@ NOTE
 }
 
 cmd_ready() {
-  require_scribble
+  require_glean
   local id="${1:-}"
   [[ -n "$id" ]] || die "ready requires <item-id>"
   validate_id "$id"
 
-  local src="$SCRIBBLE_DIR/in/$id.scribbling"
-  local dest="$SCRIBBLE_DIR/in/$id"
+  local src="$GLEAN_DIR/in/$id.scribbling"
+  local dest="$GLEAN_DIR/in/$id"
   [[ -d "$src" ]] || die "incomplete item not found: $src"
   [[ ! -e "$dest" ]] || die "ready item already exists: $dest"
   mv "$src" "$dest"
@@ -143,13 +142,13 @@ cmd_ready() {
 }
 
 cmd_finding() {
-  require_scribble
+  require_glean
   local id="${1:-}"
   [[ -n "$id" ]] || die "finding requires <finding-id>"
   validate_id "$id"
-  [[ ! -e "$SCRIBBLE_DIR/findings/$id" ]] || die "finding '$id' already exists"
+  [[ ! -e "$GLEAN_DIR/findings/$id" ]] || die "finding '$id' already exists"
 
-  local dir="$SCRIBBLE_DIR/findings/$id"
+  local dir="$GLEAN_DIR/findings/$id"
   mkdir -p "$dir"
   cat > "$dir/finding.md" <<'FINDING'
 # Finding title
@@ -170,11 +169,11 @@ FINDING
 }
 
 cmd_context() {
-  require_scribble
+  require_glean
   local id="${1:-}"
   [[ -n "$id" ]] || die "context requires <finding-id>"
   validate_id "$id"
-  local dir="$SCRIBBLE_DIR/findings/$id"
+  local dir="$GLEAN_DIR/findings/$id"
   [[ -d "$dir" ]] || die "finding '$id' not found"
 
   local file="$dir/context.md"
@@ -191,7 +190,7 @@ CONTEXT
 }
 
 cmd_drop() {
-  require_scribble
+  require_glean
   local id="${1:-}"
   shift || true
   [[ -n "$id" ]] || die "drop requires <id>"
@@ -202,7 +201,7 @@ cmd_drop() {
   [[ -n "$src" ]] || die "item '$id' not found"
 
   case "$src" in
-    "$SCRIBBLE_DIR/dropped"/*)
+    "$GLEAN_DIR/dropped"/*)
       echo "already dropped: $id"
       return 0
       ;;
@@ -210,11 +209,11 @@ cmd_drop() {
 
   local canonical
   canonical="$(strip_suffix "$(basename "$src")")"
-  local dest="$SCRIBBLE_DIR/dropped/$canonical"
+  local dest="$GLEAN_DIR/dropped/$canonical"
   [[ ! -e "$dest" ]] || die "destination already exists: $dest"
   mv "$src" "$dest"
 
-  local reason="$SCRIBBLE_DIR/dropped/$canonical.reason.md"
+  local reason="$GLEAN_DIR/dropped/$canonical.reason.md"
   {
     echo "# why $canonical was dropped"
     echo
@@ -238,15 +237,15 @@ print_dirs() {
 }
 
 cmd_status() {
-  require_scribble
+  require_glean
   echo "in"
-  print_dirs "$SCRIBBLE_DIR/in"
+  print_dirs "$GLEAN_DIR/in"
   echo
   echo "findings"
-  print_dirs "$SCRIBBLE_DIR/findings"
+  print_dirs "$GLEAN_DIR/findings"
   echo
   echo "dropped"
-  print_dirs "$SCRIBBLE_DIR/dropped"
+  print_dirs "$GLEAN_DIR/dropped"
 }
 
 main() {

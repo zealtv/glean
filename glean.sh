@@ -5,8 +5,8 @@ usage() {
   cat <<'USAGE'
 usage:
   glean.sh init
-  glean.sh ingest <item-id>
-  glean.sh ready <item-id>
+  glean.sh ingest <src> [name]
+  glean.sh ingest - <name>
   glean.sh finding <finding-id>
   glean.sh context <finding-id>
   glean.sh drop <id> [reason...]
@@ -112,33 +112,41 @@ DISTIL
 
 cmd_ingest() {
   require_glean
-  local id="${1:-}"
-  [[ -n "$id" ]] || die "ingest requires <item-id>"
-  validate_id "$id"
-  ensure_absent "$id"
+  local src="${1:-}"
+  [[ -n "$src" ]] || die "ingest requires <src> [name]"
+  shift
+  local name="${1:-}"
 
-  local dir="$GLEAN_DIR/in/$id.scribbling"
-  mkdir -p "$dir"
-  cat > "$dir/note.md" <<'NOTE'
-# Note
+  if [[ "$src" == "-" ]]; then
+    [[ -n "$name" ]] || die "ingest from stdin requires a name"
+    validate_id "$name"
+    local dest="$GLEAN_DIR/in/$name.md"
+    local landing="$dest.landing"
+    [[ ! -e "$dest" ]] || die "in/$name.md already exists"
+    [[ ! -e "$landing" ]] || die "in/$name.md.landing already exists (clean up?)"
+    cat > "$landing"
+    mv "$landing" "$dest"
+    echo "$dest"
+    return 0
+  fi
 
-Add the incoming material here.
-NOTE
-  echo "ingest $dir"
-}
+  [[ -e "$src" ]] || die "source not found: $src"
+  if [[ -z "$name" ]]; then
+    name="$(basename "$src")"
+  fi
+  validate_id "$name"
+  local dest="$GLEAN_DIR/in/$name"
+  local landing="$dest.landing"
+  [[ ! -e "$dest" ]] || die "in/$name already exists"
+  [[ ! -e "$landing" ]] || die "in/$name.landing already exists (clean up?)"
 
-cmd_ready() {
-  require_glean
-  local id="${1:-}"
-  [[ -n "$id" ]] || die "ready requires <item-id>"
-  validate_id "$id"
-
-  local src="$GLEAN_DIR/in/$id.scribbling"
-  local dest="$GLEAN_DIR/in/$id"
-  [[ -d "$src" ]] || die "incomplete item not found: $src"
-  [[ ! -e "$dest" ]] || die "ready item already exists: $dest"
-  mv "$src" "$dest"
-  echo "ready $dest"
+  if [[ -d "$src" ]]; then
+    cp -R "$src" "$landing"
+  else
+    cp "$src" "$landing"
+  fi
+  mv "$landing" "$dest"
+  echo "$dest"
 }
 
 cmd_finding() {
@@ -253,7 +261,6 @@ main() {
   case "$cmd" in
     init) shift; cmd_init "$@" ;;
     ingest) shift; cmd_ingest "$@" ;;
-    ready) shift; cmd_ready "$@" ;;
     finding) shift; cmd_finding "$@" ;;
     context) shift; cmd_context "$@" ;;
     drop) shift; cmd_drop "$@" ;;

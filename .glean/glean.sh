@@ -392,6 +392,10 @@ print_dropped() {
 
 cmd_status() {
   require_glean
+  if ! cmd_index >/dev/null 2>/dev/null; then
+    echo "warning: failed to refresh INDEX.md" >&2
+  fi
+
   echo "in"
   print_dir_entries "$GLEAN_DIR/in"
   echo

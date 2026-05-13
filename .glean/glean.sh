@@ -264,6 +264,21 @@ cmd_fetch() {
   local files=()
   mapfile -t files < <(find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.md' ! -name 'INDEX.md' 2>/dev/null | sort)
 
+  if (( ${#files[@]} > 0 )); then
+    local idx="$dir/INDEX.md"
+    if [[ ! -e "$idx" ]]; then
+      echo "warning: INDEX.md is missing; run glean.sh index" >&2
+    else
+      local candidate
+      for candidate in "${files[@]}"; do
+        if [[ "$candidate" -nt "$idx" ]]; then
+          echo "warning: INDEX.md is stale; run glean.sh index" >&2
+          break
+        fi
+      done
+    fi
+  fi
+
   local f haystack term
   for f in "${files[@]}"; do
     if [[ "$mode" == "all" ]]; then

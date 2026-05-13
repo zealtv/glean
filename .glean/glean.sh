@@ -219,12 +219,13 @@ cmd_index() {
   require_glean
   local dir="$GLEAN_DIR/findings"
   local idx="$dir/INDEX.md"
+  local landing="$idx.$$.landing"
   mkdir -p "$dir"
 
   local files=()
   mapfile -t files < <(find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.md' ! -name 'INDEX.md' 2>/dev/null | sort)
 
-  {
+  if ! {
     echo "<!-- auto-generated; run glean.sh index to refresh -->"
     echo
     local f id title desc
@@ -236,7 +237,15 @@ cmd_index() {
       [[ -n "$desc" ]] || desc="(no description)"
       echo "- [[$id]] — $title — $desc"
     done
-  } > "$idx"
+  } > "$landing"; then
+    rm -f "$landing"
+    return 1
+  fi
+
+  if ! mv "$landing" "$idx"; then
+    rm -f "$landing"
+    return 1
+  fi
 
   echo "$idx"
 }

@@ -73,12 +73,17 @@ hand when you want to remember what was let go and why.
 A finding is one markdown file at `findings/<id>.md`:
 
 - **Title** — first line, an H1 (`# Some claim`). Required.
-- **Description** — first non-empty line after the title. One sentence.
-  Surfaces in `INDEX.md`; an agent reads it to decide relevance.
+- **Description** — first non-empty line after the title. One sentence. It is
+  the **recall cue**: surfaces in `INDEX.md`, where an agent reads it to decide
+  relevance. Write it the way the finding would come up, not as an abstract.
 - **Body** — free markdown. Common sections (all optional):
   - `## Why` — motivation, source, the experience that earned this finding.
-  - `## Triggers` — phrases, topics, or symptoms that should bring this
-    finding to mind. `fetch` searches this by default.
+  - `## Triggers` — a short list of literals you'd lose to paraphrase: product
+    names, error strings, identifiers, user shorthand aliases the description
+    wouldn't contain (`roo burger`, `model exited 127`, `DEMO_KEY`). Not a
+    keyword dump, not a restatement of the title. `recall` matches them on
+    **whole words**, so write the bare word a real message contains — one-word
+    aliases like `chai`, `tempeh` are fine. `fetch` searches them loosely too.
   - `## Associations` — wikilinks to related findings: `- [[other-id]]`.
   - `## Context` — examples, references, longer notes.
 
